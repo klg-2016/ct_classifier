@@ -3,6 +3,7 @@
     data loaders) and the model and train and validate the model accordingly.
 
     2022 Benjamin Kellenberger
+    2025 Kathie Grabowski
 '''
 
 import os
