@@ -21,7 +21,17 @@ from util import init_seed
 from dataset import CTDataset
 from model import CustomResNet18
 
+from datetime import datetime #this lets us use the {timestamp} to rename model_states folder
 
+import wandb
+
+
+
+wandb.login()
+
+wandb.init(
+    # set the wandb project where this run will be logged
+    project="cv4e_initial_model")
 
 def create_dataloader(cfg, split='train'):
     '''
@@ -156,6 +166,9 @@ def train(cfg, dataLoader, model, optimizer):
         )
         progressBar.update(1)
     
+
+
+
     # end of epoch; finalize
     progressBar.close()
     loss_total /= len(dataLoader)           # shorthand notation for: loss_total = loss_total / len(dataLoader)
@@ -253,6 +266,12 @@ def main():
     # set up model optimizer
     optim = setup_optimizer(cfg, model)
 
+    # Early stopping parameters
+    patience = cfg.get('patience', 10)  # Number of epochs to wait for improvement, sets to 10 if not defined in config file
+    print(f"Starting training with a patience value of {patience}") #useful info when running your model
+    best_loss_val = float('inf')  # Best validation loss encountered
+    epochs_without_improvement = 0  # Counter for patience
+
     # we have everything now: data loaders, model, optimizer; let's do the epochs!
     numEpochs = cfg['num_epochs']
     while current_epoch < numEpochs:
@@ -269,10 +288,45 @@ def main():
             'oa_train': oa_train,
             'oa_val': oa_val
         }
+
+        # this is checkpoint saving, this saves all models
         save_model(cfg, current_epoch, model, stats)
+        #cfg: config
+        save_model(cfg, 'last', model, stats) #save last model
+
+        # Early stopping logic
+        if loss_val < best_loss_val:
+            best_loss_val = loss_val  # Update the best validation loss
+            epochs_without_improvement = 0  # Reset patience counter
+            save_model(cfg, 'best', model, stats) #second argument into this function names the model results
+            print(f"Best model!!!! saving model at epoch {current_epoch}")
+        else:
+            epochs_without_improvement += 1
+            print(f"No improvement in validation loss for {epochs_without_improvement} epoch(s).")
+
+        if epochs_without_improvement >= patience:
+            print(f"Early stopping triggered after {patience} epochs without improvement.")
+            break  # Exit training loop
+
+        
     
+        # log metrics to wandb
+        wandb.log(stats) #this takes a dict, stats is already a dict
+
+
+    # Get current date and time
+    now = datetime.now()
+
+    # Format it as a string that can be safely used in a folder name
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+
+    print(timestamp)  # Output will look like '2025-01-16_12-30-45'
+
+
+    os.rename('model_states', f'model_states-{timestamp}')
 
     # That's all, folks!
+    wandb.finish()
         
 
 

@@ -1,8 +1,9 @@
 datasets
-model_states
-
+model_states-*/
+wandb/
 __pycache__
 *.pyc
 
 .vscode
 .DS_Store
+model_states-2025-01-17_19-56-30/1.pt
