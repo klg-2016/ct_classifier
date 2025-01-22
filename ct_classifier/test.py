@@ -110,3 +110,18 @@ print(df.head())
 df.to_csv(f'{root_path}/results.csv', index=False) #save it as a csv
 
 # #note: DataFrame, list are both classes with functions that work on them
+
+
+
+# MAH adding stuff for lster use
+true_all
+true_super = true_all[mapping_of_finegrsined_to_superclasses]
+
+pred_all
+mapping_of_finegrsined_to_superclasses ={1:1,2:1,3:1,4:2,5:3}
+pred_super = pred_all[mapping_of_finegrsined_to_superclasses] # mapp from all the classes to just the supercalsses
+confidence_scores_super = F.softmax(pred_super, dim=1).max(dim=1)[0].tolist() #softmax turns the numbers into numbers from 0 to 1
+
+
+
+
