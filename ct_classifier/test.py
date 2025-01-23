@@ -37,7 +37,7 @@ def create_dataloader(cfg, split='train'):
         )
     return dataLoader
 
-root_path = '/home/Kathryn/code/ct_classifier/model_states-2025-01-23_02-01-35'
+root_path = '/home/Kathryn/code/ct_classifier/model_states'
 
 
 # Open the model
