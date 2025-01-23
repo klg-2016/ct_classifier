@@ -9,7 +9,17 @@ num_workers: 4          # number of CPU cores that load data in parallel. You ca
 
 # dataset parameters
 data_root: /mnt/class_data/group4/katie/processed
-num_classes: 51
+
+# this is for finegrained
+# train_annotations_filename: 'train_annotations_spp.json'
+# val_annotations_filename: 'cis_val_annotations_spp.json'
+# num_classes: 51
+
+# this is for grouped classes
+train_annotations_filename: 'train_annotations_spp_grouped.json'
+val_annotations_filename: 'cis_val_annotations_spp_grouped.json'
+num_classes: 28
+
 
 # training hyperparameters
 image_size: [224, 224]

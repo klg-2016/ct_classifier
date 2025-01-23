@@ -61,12 +61,13 @@ def load_model(cfg):
     model_states = glob.glob('model_states/*.pt')
     if len(model_states):
         # at least one save state found; get latest
+        model_states = [model_state for model_state in model_states if not "last.pt" in model_state  and not "best.pt" in model_state ]
         model_epochs = [int(m.replace('model_states/','').replace('.pt','')) for m in model_states]
         start_epoch = max(model_epochs)
 
         # load state dict and apply weights to model
-        print(f'Resuming from epoch {start_epoch}')
-        state = torch.load(open(f'model_states/{start_epoch}.pt', 'rb'), map_location='cpu')
+        print(f'Resuming from epoch last.pt')
+        state = torch.load(open(f'model_states/last.pt', 'rb'), map_location='cpu')
         model_instance.load_state_dict(state['model'])
 
     else:
@@ -89,7 +90,7 @@ def save_model(cfg, epoch, model, stats):
     torch.save(stats, open(f'model_states/{epoch}.pt', 'wb'))
     
     # also save config file if not present
-    cfpath = 'model_states/config.yaml'
+    cfpath = 'model_states/configs_used_for_this_run.yaml'
     if not os.path.exists(cfpath):
         with open(cfpath, 'w') as f:
             yaml.dump(cfg, f)
@@ -132,7 +133,7 @@ def train(cfg, dataLoader, model, optimizer):
 
     # iterate over dataLoader
     progressBar = trange(len(dataLoader))
-    for idx, (data, labels) in enumerate(dataLoader):       # see the last line of file "dataset.py" where we return the image tensor (data) and label
+    for idx, (data, labels, image_names) in enumerate(dataLoader):       # see the last line of file "dataset.py" where we return the image tensor (data) and label
 
         # put data and labels on device
         data, labels = data.to(device), labels.to(device)
@@ -201,8 +202,7 @@ def validate(cfg, dataLoader, model):
     progressBar = trange(len(dataLoader))
     
     with torch.no_grad():               # don't calculate intermediate gradient steps: we don't need them, so this saves memory and is faster
-        for idx, (data, labels) in enumerate(dataLoader):
-
+        for idx, (data, labels, image_names) in enumerate(dataLoader):
             # put data and labels on device
             data, labels = data.to(device), labels.to(device)
 
