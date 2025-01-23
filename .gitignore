@@ -1,5 +1,6 @@
 datasets
 model_states-*/
+model_states/
 wandb/
 __pycache__
 *.pyc
