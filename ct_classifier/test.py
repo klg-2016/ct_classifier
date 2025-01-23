@@ -22,6 +22,7 @@ import torch.nn.functional as F
 # the goal is to test the model on images and see which ones are problematic
 # for that, we need filename, prediction, ground truth and confidence. Preferably in a dataframe with those columns.
 
+#should this be train???
 def create_dataloader(cfg, split='train'):
     '''
         Loads a dataset according to the provided split and wraps it in a
@@ -36,7 +37,8 @@ def create_dataloader(cfg, split='train'):
         )
     return dataLoader
 
-root_path = '/home/Kathryn/code/ct_classifier/model_states-2025-01-17_21-39-55'
+root_path = '/home/Kathryn/code/ct_classifier/model_states-2025-01-23_02-01-35'
+
 
 # Open the model
 cfg = yaml.safe_load(open('/home/Kathryn/code/ct_classifier/configs/exp_resnet18.yaml', 'r')) #r means read
@@ -81,11 +83,11 @@ with torch.no_grad():
             file = image_names[idx]
             files.append(file)
 
-            print(f"pred : {pred}")
-            print(f"true : {true}")
-            print(f"conf : {conf}")
-            print(f"file : {file}")
-            print("")
+            # print(f"pred : {pred}")
+            # print(f"true : {true}")
+            # print(f"conf : {conf}")
+            # print(f"file : {file}")
+            # print("")
 
 #filenames is a list already
 #need to get predictions into a list
@@ -106,21 +108,20 @@ df = pd.DataFrame(data)
 
 print(df.head())
 
-#SOMETHING HERE IS WRONG
 df.to_csv(f'{root_path}/results.csv', index=False) #save it as a csv
 
 # #note: DataFrame, list are both classes with functions that work on them
 
 
 
-# MAH adding stuff for lster use
-true_all
-true_super = true_all[mapping_of_finegrsined_to_superclasses]
+# # MAH adding stuff for lster use
+# true_all
+# true_super = true_all[mapping_of_finegrsined_to_superclasses]
 
-pred_all
-mapping_of_finegrsined_to_superclasses ={1:1,2:1,3:1,4:2,5:3}
-pred_super = pred_all[mapping_of_finegrsined_to_superclasses] # mapp from all the classes to just the supercalsses
-confidence_scores_super = F.softmax(pred_super, dim=1).max(dim=1)[0].tolist() #softmax turns the numbers into numbers from 0 to 1
+# pred_all
+# mapping_of_finegrsined_to_superclasses ={1:1,2:1,3:1,4:2,5:3}
+# pred_super = pred_all[mapping_of_finegrsined_to_superclasses] # mapp from all the classes to just the supercalsses
+# confidence_scores_super = F.softmax(pred_super, dim=1).max(dim=1)[0].tolist() #softmax turns the numbers into numbers from 0 to 1
 
 
 
