@@ -1,0 +1,3 @@
+# required: also install torch and torch vision according to your CUDA constraints!
+PyYAML
+tqdm
