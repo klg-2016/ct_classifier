@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn  
 from torch.utils.data import DataLoader 
 from torch.optim import SGD 
+from sklearn.metrics import precision_recall_fscore_support
 
 # let's import our own classes and functions!
 from util import init_seed
@@ -168,6 +169,9 @@ def log_predictions_table(phase, model, dataLoader, cfg, max_samples=20):
 
 
 def train(cfg, dataLoader, model, optimizer):
+    all_preds = []
+    all_labels = []
+    
     device = cfg['device'] 
     model.to(device)
     model.train()
@@ -213,6 +217,8 @@ def train(cfg, dataLoader, model, optimizer):
     loss_total /= len(dataLoader)
     oa_total /= len(dataLoader)
     
+
+    
     # Compute per-class precision, recall, and F1-score
     precision, recall, f1, _ = precision_recall_fscore_support(
     all_labels, all_preds, average=None, labels=list(range(cfg['num_classes']))
@@ -223,19 +229,22 @@ def train(cfg, dataLoader, model, optimizer):
 
     # Log to wandb for each class
     for i, (p, r, f1s) in enumerate(zip(precision, recall, f1)):
-    wandb.log({
-        f"Train Precision Class {i}": p,
-        f"Train Recall Class {i}": r,
-        f"Train F1-score Class {i}": f1s,
-    })
+        wandb.log({
+            f"Train Precision Class {i}": p,
+            f"Train Recall Class {i}": r,
+            f"Train F1-score Class {i}": f1s,
+        })
 
     # 🔥 Log predictions for train phase 🔥
     log_predictions_table("train", model, dataLoader, cfg)
 
-    return loss_total, oa_total
+    return loss_total, oa_total, p, r, f1s
     
 
 def validate(cfg, dataLoader, model):
+    all_preds = []
+    all_labels = []
+    
     device = cfg['device']
     model.to(device)
     model.eval()
@@ -283,16 +292,16 @@ def validate(cfg, dataLoader, model):
 
     # Log to wandb for each class
     for i, (p, r, f1s) in enumerate(zip(precision, recall, f1)):
-    wandb.log({
-        f"Train Precision Class {i}": p,
-        f"Train Recall Class {i}": r,
-        f"Train F1-score Class {i}": f1s,
-    })
+        wandb.log({
+            f"Train Precision Class {i}": p,
+            f"Train Recall Class {i}": r,
+            f"Train F1-score Class {i}": f1s,
+        })
 
     # 🔥 Log predictions for validation phase 🔥
     log_predictions_table("validation", model, dataLoader, cfg)
 
-    return loss_total, oa_total
+    return loss_total, oa_total, p, r, f1s
 
 
 def parse_args():
@@ -373,15 +382,21 @@ def main():
         current_epoch += 1
         print(f'Epoch {current_epoch}/{numEpochs}')
 
-        loss_train, oa_train = train(cfg, dl_train, model, optim)
-        loss_val, oa_val = validate(cfg, dl_val, model)
+        loss_train, oa_train, p_train, r_train, f1s_train = train(cfg, dl_train, model, optim)
+        loss_val, oa_val, p_valid, r_valid, f1s_valid = validate(cfg, dl_val, model)
 
         # combine stats and save
         stats = {
-            'loss_train': loss_train,
-            'loss_val': loss_val,
-            'overall_accuracy_train': oa_train,
-            'overall_accuracy_val': oa_val,
+            'Train Loss': loss_train,
+            'Valid Loss': loss_val,
+            'Train Overall Accuracy': oa_train,
+            'Valid Overall Accuracy': oa_val,
+            'Train Recall': r_train,
+            'Valid Recall': r_recall,
+            'Train Precision': p_train,
+            'Valid Precision': p_valid,
+            'Train F1': f1s_train,
+            'Valid F1': f1s_valid,
             'epoch': epoch
         }
 
