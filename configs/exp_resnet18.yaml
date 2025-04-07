@@ -8,7 +8,9 @@ device: mps            # if you have multiple GPU's, you can use 'cude:4' to spe
 num_workers: 8          # number of CPU cores that load data in parallel. You can set this to the number of logical CPU cores that you have. 
 
 # dataset parameters
-data_root: /Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
+# data_root: /Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
+data_root: /Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
+
 
 # this is for finegrained
 # train_annotations_filename: 'train_annotations_spp.json'
