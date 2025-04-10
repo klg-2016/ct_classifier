@@ -4,12 +4,12 @@
 
 # environment/computational parameters
 seed: 32678456782       # random number generator seed (long integer value)
-device: mps            # if you have multiple GPU's, you can use 'cude:4' to specify which GPU to run on, e.g., the 4th
+device: 'cuda:1'           # if you have multiple GPU's, you can use 'cuda:4' to specify which GPU to run on, e.g., the 4th
 num_workers: 8          # number of CPU cores that load data in parallel. You can set this to the number of logical CPU cores that you have. 
 
 # dataset parameters
 # data_root: /Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
-data_root: /Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
+data_root: /home/sabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/datasets/CaltechCT
 
 
 # this is for finegrained
@@ -30,8 +30,8 @@ num_classes: 16
 
 # training hyperparameters
 image_size: [224, 224]
-num_epochs: 3        # number of epochs. Each epoch has multiple iterations. In each epoch the model goes over the full dataset once.
-batch_size: 128         # number of images that are processed in parallel in every iteration
+num_epochs: 20        # number of epochs. Each epoch has multiple iterations. In each epoch the model goes over the full dataset once.
+batch_size: 16         # number of images that are processed in parallel in every iteration
 learning_rate: 0.001    # hyperparameter to adjust the optimizer's learning rate 
 weight_decay: 0.001     # hyperparameter for regularization
-patience: 5
+patience: 10

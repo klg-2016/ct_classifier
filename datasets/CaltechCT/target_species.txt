@@ -1,0 +1,16 @@
+bobcat
+opossum
+empty
+coyote
+raccoon
+bird
+dog
+cat
+squirrel
+rabbit
+skunk
+rodent
+badger
+deer
+car
+fox
