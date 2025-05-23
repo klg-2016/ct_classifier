@@ -18,18 +18,25 @@ elif torch.cuda.is_available():
     device = torch.device("cuda")
 else:
     device = torch.device("cpu")
-
+    
 # === Config ===
-csv_path = '/Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/notebooks/full_df_filtered.csv'
-label_mapping_path = '/Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/species_with_label_matching.csv'
-classifier_model_name = "/Users/sarahabdelazim/.cache/kagglehub/models/google/speciesnet/pyTorch/v4.0.1a/1"
-target_species_txt = "/Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/ct_classifier/target_species.txt"
-credentials_path = '/Users/sarahabdelazim/Desktop/Kaitlyn_Catalyst/credentials.json'
+# Root directory (automatically resolves to the correct home/Desktop path)
+base_dir = os.path.expanduser("~/Desktop/Kaitlyn_Catalyst/ct_classifier")
+
+# Construct all paths relative to the base directory
+csv_path = os.path.join(base_dir, "notebooks", "full_df_filtered.csv")
+label_mapping_path = os.path.join(base_dir, "species_with_label_matching.csv")
+target_species_txt = os.path.join(base_dir, "target_species.txt")
+credentials_path = os.path.expanduser("~/Desktop/Kaitlyn_Catalyst/credentials.json")
+
+# Model cache path stays the same (already uses home directory notation)
+classifier_model_name = os.path.expanduser("~/.cache/kagglehub/models/google/speciesnet/pyTorch/v4.0.1a/1")
+
 num_epochs = 5
 
 # === Initialize Weights & Biases ===
 wandb.init(
-    project="mongoose-classification",
+    project="Species-Classification",
     name="speciesnet-v1",
     config={
         "epochs": num_epochs,
@@ -37,6 +44,8 @@ wandb.init(
         "model": "AugmentedSpeciesNet + SpeciesNetClassifier"
     }
 )
+
+print(f"Using '{device}' device", flush=True)
 
 # === Load and Prepare Data ===
 full_df = pd.read_csv(csv_path)

@@ -12,7 +12,7 @@ from google.oauth2 import service_account
 from tqdm import tqdm
 
 # === Parameters ===
-SOURCE_FILE = "all_image_links_2018_2019_2.json"  # <-- Change this per run
+SOURCE_FILE = "all_image_links_2018_2019_1.json"  # <-- Change this per run
 AUTOSAVE_FILE = SOURCE_FILE.replace(".json", "_autosave_partial.json")
 OUTPUT_FILE = SOURCE_FILE.replace(".json", "_with_datetime.json")
 
