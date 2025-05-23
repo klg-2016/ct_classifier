@@ -1,1 +1,3 @@
 **/*.JPG
+notebooks/full_df_filled.csv
+notebooks/raw/full_df.csv
