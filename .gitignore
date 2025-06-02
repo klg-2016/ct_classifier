@@ -1,5 +1,7 @@
-**/*.JPG
+*.jpg
 notebooks/full_df_filled.csv
 notebooks/full_df_filtered.csv
 notebooks/raw/full_df.csv
 *checkpoint*
+notebooks/full_df_filtered.csv
+notebooks/species_downloader.ipynb
