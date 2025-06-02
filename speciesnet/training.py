@@ -1,4 +1,6 @@
 import os
+from tqdm import tqdm
+import json
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -7,180 +9,175 @@ from torchvision import transforms
 from PIL import Image
 from speciesnet.classifier import SpeciesNetClassifier
 from speciesnet.detector import SpeciesNetDetector
-from dataloader import GoogleDriveAPIDataset, stratified_site_split
+from splitting import extract_species_and_site_from_filename, stratified_site_split_from_folder, filter_df_with_detections
+from dataloader import SpeciesImageDataset
 from model import AugmentedSpeciesNet
+from sklearn.metrics import classification_report, accuracy_score
+from torch.utils.data import DataLoader, TensorDataset
 import wandb
 
 # === Device Selection ===
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-    
+device = (
+    torch.device("mps") if torch.backends.mps.is_available()
+    else torch.device("cuda") if torch.cuda.is_available()
+    else torch.device("cpu")
+)
+
 # === Config ===
-# Root directory (automatically resolves to the correct home/Desktop path)
 base_dir = os.path.expanduser("~/Desktop/Kaitlyn_Catalyst/ct_classifier")
-
-# Construct all paths relative to the base directory
 csv_path = os.path.join(base_dir, "notebooks", "full_df_filtered.csv")
-label_mapping_path = os.path.join(base_dir, "species_with_label_matching.csv")
 target_species_txt = os.path.join(base_dir, "target_species.txt")
-credentials_path = os.path.expanduser("~/Desktop/Kaitlyn_Catalyst/credentials.json")
-
-# Model cache path stays the same (already uses home directory notation)
+image_dir = os.path.join(base_dir, "datasets", "all_species_images")
 classifier_model_name = os.path.expanduser("~/.cache/kagglehub/models/google/speciesnet/pyTorch/v4.0.1a/1")
-
-num_epochs = 5
+num_epochs = 1
+batch_size = 16
 
 # === Initialize Weights & Biases ===
 wandb.init(
     project="Species-Classification",
     name="speciesnet-v1",
-    config={
-        "epochs": num_epochs,
-        "lr": 1e-4,
-        "model": "AugmentedSpeciesNet + SpeciesNetClassifier"
-    }
+    config={"epochs": num_epochs, "lr": 1e-4, "batch_size": batch_size, "model": "AugmentedSpeciesNet"}
 )
+wandb.define_metric("epoch")
+wandb.define_metric("*", step_metric="epoch")
 
 print(f"Using '{device}' device", flush=True)
 
-# === Load and Prepare Data ===
+# === Load Data ===
 full_df = pd.read_csv(csv_path)
-label_map_df = pd.read_csv(label_mapping_path)
+train_df, val_df = stratified_site_split_from_folder(image_dir, test_size=0.3)
 
-full_df["species_cleaned"] = full_df["species"].str.strip().str.lower()
-label_map_df["CommName"] = label_map_df["CommName"].str.strip().str.lower()
-species_to_uuid = dict(zip(label_map_df["CommName"], label_map_df["Matching_JSON_Entries"]))
-full_df["ground_truth_uuid"] = full_df["species_cleaned"].map(species_to_uuid)
-
-# === Load Base Classifier ===
-classifier = SpeciesNetClassifier(model_name=classifier_model_name, target_species_txt=target_species_txt)
-original_outputs = len(classifier.labels)
-
-# === Add extra class index for Mongoose ===
-mongoose_index = original_outputs
-classifier.model = AugmentedSpeciesNet(classifier.model, original_outputs=original_outputs, extra_outputs=1)
-classifier.model = classifier.model.to(device)
-classifier.model.train()
-
-# === Enable training on all layers ===
-for param in classifier.model.parameters():
-    param.requires_grad = True
-
-# === Map UUIDs to Indices ===
-uuid_to_idx = {uuid: idx for idx, uuid in enumerate(classifier.target_labels)}
-uuid_to_idx["mongoose"] = mongoose_index  # manually add mongoose index
-full_df["ground_truth_index"] = full_df["ground_truth_uuid"].map(uuid_to_idx)
-full_df = full_df.dropna(subset=["ground_truth_index"])
-full_df["ground_truth_index"] = full_df["ground_truth_index"].astype(int)
-
-# === Transforms ===
-transform = transforms.Compose([
-    transforms.Resize((480, 480)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-])
-
-# === Split ===
-train_df, val_df = stratified_site_split(full_df)
-train_dataset = GoogleDriveAPIDataset(df=train_df, credentials_path=credentials_path, transform=None)
-val_dataset = GoogleDriveAPIDataset(df=val_df, credentials_path=credentials_path, transform=None)
-
-# === Load Detector ===
+# === Detector ===
 detector = SpeciesNetDetector(model_name=classifier_model_name)
 
-# === Loss + Optimizer ===
-criterion = nn.CrossEntropyLoss()
+# === Filter by detector and cache ===
+train_filtered_path = os.path.join(base_dir, "speciesnet/train_filtered.csv")
+val_filtered_path = os.path.join(base_dir, "speciesnet/val_filtered.csv")
+
+if os.path.exists(train_filtered_path) and os.path.exists(val_filtered_path):
+    print("Using cached filtered CSVs.")
+    train_filtered_df = pd.read_csv(train_filtered_path)
+    val_filtered_df = pd.read_csv(val_filtered_path)
+else:
+    print("Running detector to filter train/val...")
+    train_filtered_df = filter_df_with_detections(train_df, image_dir, detector)
+    val_filtered_df = filter_df_with_detections(val_df, image_dir, detector)
+    train_filtered_df.to_csv(train_filtered_path, index=False)
+    val_filtered_df.to_csv(val_filtered_path, index=False)
+    print("Filtered train/val saved.")
+
+# === Load classifier and wrap model ===
+classifier = SpeciesNetClassifier(model_name=classifier_model_name, target_species_txt=target_species_txt)
+original_outputs = len(classifier.labels)
+target_labels = len(classifier.target_labels)
+classifier.model = AugmentedSpeciesNet(classifier.model, original_outputs, target_labels)
+classifier.model.to(device)
+
+# === Loss & Optimizer ===
+criterion = nn.CrossEntropyLoss().to(device)
 optimizer = optim.Adam(classifier.model.parameters(), lr=1e-4)
 
-# === Training & Validation ===
+# === DataLoaders ===
+train_dataset = SpeciesImageDataset(train_filtered_df, image_dir, classifier)
+val_dataset = SpeciesImageDataset(val_filtered_df, image_dir, classifier)
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+# === Training Loop ===
 for epoch in range(num_epochs):
-    print(f"\n🌀 Epoch {epoch + 1}/{num_epochs}")
+    print(f"Epoch {epoch + 1}/{num_epochs}")
     classifier.model.train()
     train_loss = 0.0
+    train_preds, train_trues = [], []
 
-    for i in range(len(train_dataset)):
-        try:
-            row = train_dataset.df.iloc[i]
-            save_path = os.path.join(train_dataset.temp_dir, row['filename'])
+    for x_batch, y_batch in tqdm(train_loader, desc="Training"):
+        x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+        optimizer.zero_grad()
+        outputs = classifier.model(x_batch)
+        loss = criterion(outputs, y_batch)
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+        
+        # === Calculate per-batch accuracy ===
+        preds = torch.argmax(outputs, dim=1)
+        batch_acc = torch.mean((preds == y_batch).float()).item()
 
-            _ = train_dataset[i]  # download image if needed
+        # === Print batch loss and accuracy ===
+        print(f"Batch Loss: {loss.item():.4f} | Batch Acc: {batch_acc:.4f}")
 
-            raw_img = Image.open(save_path).convert("RGB")
-            preprocessed_image = detector.preprocess(raw_img)
-            detections_result = detector.predict(filepath=save_path, img=preprocessed_image)
-            detections = detections_result.get("detections", [])
-            if not detections:
-                print(f"🗑️ No detection — skipping {row['filename']}")
-                continue
+        train_preds.extend(preds.cpu().numpy())
+        train_trues.extend(y_batch.cpu().numpy())
 
-            img_tensor = transform(raw_img)
-            x = img_tensor.unsqueeze(0).to(device)
-            label = int(row['ground_truth_index'])
-            label_tensor = torch.tensor(label, dtype=torch.long, device=device).unsqueeze(0)
-
-            optimizer.zero_grad()
-            outputs = classifier.model(x)
-            loss = criterion(outputs, label_tensor)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-
-            wandb.log({"train/loss": loss.item()}, step=i + epoch * len(train_dataset))
-
-        except Exception as e:
-            print(f"⚠️ Training error at {row.get('filename', 'unknown')}: {e}")
-
-    avg_train_loss = train_loss / len(train_dataset)
-    print(f"✅ Avg Train Loss: {avg_train_loss:.4f}")
+    avg_train_loss = train_loss / len(train_loader)
+    train_acc = accuracy_score(train_trues, train_preds)
+    print(f"✅ Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.4f}")
 
     # === Validation ===
     classifier.model.eval()
     val_loss = 0.0
+    val_preds, val_trues = [], []
 
     with torch.no_grad():
-        for j in range(len(val_dataset)):
-            try:
-                row = val_dataset.df.iloc[j]
-                save_path = os.path.join(val_dataset.temp_dir, row['filename'])
+        for x_batch, y_batch in tqdm(val_loader, desc="Validating"):
+            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+            outputs = classifier.model(x_batch)
+            loss = criterion(outputs, y_batch)
+            val_loss += loss.item()
+            
+            # === Calculate per-batch accuracy ===
+            preds = torch.argmax(outputs, dim=1)
+            batch_acc = torch.mean((preds == y_batch).float()).item()
 
-                _ = val_dataset[j]  # download image if needed
+            # === Print batch loss and accuracy ===
+            print(f"Batch Loss: {loss.item():.4f} | Batch Acc: {batch_acc:.4f}")
+            
+            val_preds.extend(preds.cpu().numpy())
+            val_trues.extend(y_batch.cpu().numpy())
 
-                raw_img = Image.open(save_path).convert("RGB")
-                preprocessed_image = detector.preprocess(raw_img)
-                detections_result = detector.predict(filepath=save_path, img=preprocessed_image)
-                detections = detections_result.get("detections", [])
-                if not detections:
-                    print(f"🗑️ No detection — skipping {row['filename']}")
-                    continue
+    avg_val_loss = val_loss / len(val_loader)
+    val_acc = accuracy_score(val_trues, val_preds)
+    print(f"✅ Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.4f}")
+     
+    # Load the mapping JSON file
+    with open("id_to_species_full.json", "r") as f:
+        id_to_species = json.load(f)
 
-                img_tensor = transform(raw_img)
-                x = img_tensor.unsqueeze(0).to(device)
-                label = int(row['ground_truth_index'])
-                label_tensor = torch.tensor(label, dtype=torch.long, device=device).unsqueeze(0)
+    # Build reverse map from target_label to short_name
+    targetlabel_to_shortname = {
+        info["target_label"]: info["short_name"].replace(" ", "_")
+        for info in id_to_species.values()
+    }
+    
+    shortnames = [targetlabel_to_shortname[label] for label in classifier.target_labels]
 
-                outputs = classifier.model(x)
-                loss = criterion(outputs, label_tensor)
-                val_loss += loss.item()
-
-            except Exception as e:
-                print(f"⚠️ Validation error at {row.get('filename', 'unknown')}: {e}")
-
-    avg_val_loss = val_loss / len(val_dataset)
-    print(f"🔍 Avg Val Loss: {avg_val_loss:.4f}")
+    # === Logging with wandb ===
+    train_report = classification_report(train_trues, train_preds, target_names=shortnames, output_dict=True)
+    val_report = classification_report(val_trues, val_preds, target_names=shortnames, output_dict=True)
 
     wandb.log({
         "epoch": epoch + 1,
         "train/avg_loss": avg_train_loss,
-        "val/avg_loss": avg_val_loss
+        "train/accuracy": train_acc,
+        "val/avg_loss": avg_val_loss,
+        "val/accuracy": val_acc,
     })
+    
+    # ✅ Loop through class shortnames
+    for short_name in shortnames:
+        if short_name in train_report:
+            wandb.log({
+                f"{short_name}/train_precision": train_report[short_name]["precision"],
+                f"{short_name}/train_recall": train_report[short_name]["recall"],
+                f"{short_name}/train_f1": train_report[short_name]["f1-score"],
+            }, step=epoch + 1)
 
-# === Cleanup ===
-train_dataset.cleanup()
-val_dataset.cleanup()
+        if short_name in val_report:
+            wandb.log({
+                f"{short_name}/val_precision": val_report[short_name]["precision"],
+                f"{short_name}/val_recall": val_report[short_name]["recall"],
+                f"{short_name}/val_f1": val_report[short_name]["f1-score"],
+            }, step=epoch + 1)
 
-# === Finish W&B ===
 wandb.finish()

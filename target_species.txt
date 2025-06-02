@@ -45,4 +45,3 @@ d4817787-1c5b-4dfe-9251-03c759845951;aves;galliformes;numididae;guttera;pucheran
 739a105e-d883-4ff8-9282-7ec44018e6a0;reptilia;;;;;reptile
 a27d3983-76a1-4d2d-b080-18747cd77dcb;mammalia;artiodactyla;;;;even-toed ungulate
 30015f2a-5598-461d-bc33-1eb2cef56f1a;aves;galliformes;numididae;;;guineafowl family
-Mongoose
