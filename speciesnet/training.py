@@ -29,7 +29,7 @@ csv_path = os.path.join(base_dir, "notebooks", "full_df_filtered.csv")
 target_species_txt = os.path.join(base_dir, "target_species.txt")
 image_dir = os.path.join(base_dir, "datasets", "all_species_images")
 classifier_model_name = os.path.expanduser("~/.cache/kagglehub/models/google/speciesnet/pyTorch/v4.0.1a/1")
-num_epochs = 1
+num_epochs = 5
 batch_size = 16
 
 # === Initialize Weights & Biases ===
