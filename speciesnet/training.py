@@ -1,4 +1,5 @@
 import os
+import gc
 from tqdm import tqdm
 import json
 import pandas as pd
@@ -26,20 +27,33 @@ device = (
 # === Config ===
 base_dir = os.path.expanduser("~/Desktop/Kaitlyn_Catalyst/ct_classifier")
 csv_path = os.path.join(base_dir, "notebooks", "full_df_filtered.csv")
-target_species_txt = os.path.join(base_dir, "target_species.txt")
+target_species_txt = os.path.join(base_dir, "target_species_top4.txt")
 image_dir = os.path.join(base_dir, "datasets", "all_species_images")
 classifier_model_name = os.path.expanduser("~/.cache/kagglehub/models/google/speciesnet/pyTorch/v4.0.1a/1")
-num_epochs = 5
+num_epochs = 15
 batch_size = 16
 
 # === Initialize Weights & Biases ===
 wandb.init(
     project="Species-Classification",
-    name="speciesnet-v1",
-    config={"epochs": num_epochs, "lr": 1e-4, "batch_size": batch_size, "model": "AugmentedSpeciesNet"}
+    config={
+        "epochs": 15,
+        "lr": 1e-4,
+        "batch_size": 16,
+        "model": "SpeciesNet-Top4",
+        "label_smoothing": 0.1,
+        "weight_decay": 5e-4,
+        "dropout": 0.5
+    }
 )
+
 wandb.define_metric("epoch")
 wandb.define_metric("*", step_metric="epoch")
+
+config = wandb.config
+
+# Dynamically rename run based on sweep config
+wandb.run.name = f"ls_{config.label_smoothing}-wd_{config.weight_decay}-do_{config.dropout}"
 
 print(f"Using '{device}' device", flush=True)
 
@@ -70,21 +84,44 @@ else:
 classifier = SpeciesNetClassifier(model_name=classifier_model_name, target_species_txt=target_species_txt)
 original_outputs = len(classifier.labels)
 target_labels = len(classifier.target_labels)
-classifier.model = AugmentedSpeciesNet(classifier.model, original_outputs, target_labels)
-classifier.model.to(device)
+
+# Use sweep values
+label_smoothing = config.label_smoothing
+weight_decay = config.weight_decay
+dropout = config.dropout
+
+# Update classifier with dynamic dropout
+classifier.model = AugmentedSpeciesNet(
+    classifier.model,
+    original_outputs,
+    target_labels,
+    use_extra_head=True,
+    dropout=dropout
+)
+classifier.model = classifier.model.to(device)
 
 # === Loss & Optimizer ===
-criterion = nn.CrossEntropyLoss().to(device)
-optimizer = optim.Adam(classifier.model.parameters(), lr=1e-4)
+criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing).to(device)
+optimizer = torch.optim.Adam(classifier.model.parameters(), lr=config.lr, weight_decay=weight_decay)
 
 # === DataLoaders ===
-train_dataset = SpeciesImageDataset(train_filtered_df, image_dir, classifier)
-val_dataset = SpeciesImageDataset(val_filtered_df, image_dir, classifier)
+train_dataset = SpeciesImageDataset(train_filtered_df, image_dir, classifier, top4_only=True)
+val_dataset = SpeciesImageDataset(val_filtered_df, image_dir, classifier, top4_only=True)
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
 
 # === Training Loop ===
+best_train_acc = 0.0
+best_train_epoch = 0
+best_train_preds = []
+best_train_trues = []
+
+best_val_acc = 0.0
+best_val_epoch = 0
+best_val_preds = []
+best_val_trues = []
+
 for epoch in range(num_epochs):
     print(f"Epoch {epoch + 1}/{num_epochs}")
     classifier.model.train()
@@ -97,24 +134,25 @@ for epoch in range(num_epochs):
         outputs = classifier.model(x_batch)
         loss = criterion(outputs, y_batch)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(classifier.model.parameters(), max_norm=1.0)
         optimizer.step()
         train_loss += loss.item()
-        
-        # === Calculate per-batch accuracy ===
+
         preds = torch.argmax(outputs, dim=1)
-        batch_acc = torch.mean((preds == y_batch).float()).item()
+        train_preds.extend(preds.detach().cpu().numpy())
+        train_trues.extend(y_batch.detach().cpu().numpy())
 
-        # === Print batch loss and accuracy ===
-        print(f"Batch Loss: {loss.item():.4f} | Batch Acc: {batch_acc:.4f}")
-
-        train_preds.extend(preds.cpu().numpy())
-        train_trues.extend(y_batch.cpu().numpy())
+        del x_batch, y_batch, outputs, preds
 
     avg_train_loss = train_loss / len(train_loader)
     train_acc = accuracy_score(train_trues, train_preds)
-    print(f"✅ Train Loss: {avg_train_loss:.4f} | Train Acc: {train_acc:.4f}")
 
-    # === Validation ===
+    if train_acc > best_train_acc:
+        best_train_acc = train_acc
+        best_train_epoch = epoch + 1
+        best_train_preds = train_preds.copy()
+        best_train_trues = train_trues.copy()
+
     classifier.model.eval()
     val_loss = 0.0
     val_preds, val_trues = [], []
@@ -125,36 +163,45 @@ for epoch in range(num_epochs):
             outputs = classifier.model(x_batch)
             loss = criterion(outputs, y_batch)
             val_loss += loss.item()
-            
-            # === Calculate per-batch accuracy ===
-            preds = torch.argmax(outputs, dim=1)
-            batch_acc = torch.mean((preds == y_batch).float()).item()
 
-            # === Print batch loss and accuracy ===
-            print(f"Batch Loss: {loss.item():.4f} | Batch Acc: {batch_acc:.4f}")
-            
-            val_preds.extend(preds.cpu().numpy())
-            val_trues.extend(y_batch.cpu().numpy())
+            preds = torch.argmax(outputs, dim=1)
+            val_preds.extend(preds.detach().cpu().numpy())
+            val_trues.extend(y_batch.detach().cpu().numpy())
+
+            del x_batch, y_batch, outputs, preds
 
     avg_val_loss = val_loss / len(val_loader)
     val_acc = accuracy_score(val_trues, val_preds)
-    print(f"✅ Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc:.4f}")
-     
-    # Load the mapping JSON file
+
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        best_val_epoch = epoch + 1
+        best_val_preds = val_preds.copy()
+        best_val_trues = val_trues.copy()
+
     with open("id_to_species_full.json", "r") as f:
         id_to_species = json.load(f)
 
-    # Build reverse map from target_label to short_name
     targetlabel_to_shortname = {
         info["target_label"]: info["short_name"].replace(" ", "_")
         for info in id_to_species.values()
     }
-    
     shortnames = [targetlabel_to_shortname[label] for label in classifier.target_labels]
 
-    # === Logging with wandb ===
-    train_report = classification_report(train_trues, train_preds, target_names=shortnames, output_dict=True)
-    val_report = classification_report(val_trues, val_preds, target_names=shortnames, output_dict=True)
+    # === Always compute and log classification reports ===
+    train_report = classification_report(
+        train_trues,
+        train_preds,
+        target_names=shortnames,
+        labels=list(range(len(shortnames))),
+        output_dict=True)
+
+    val_report = classification_report(
+        val_trues,
+        val_preds,
+        target_names=shortnames,
+        labels=list(range(len(shortnames))),
+        output_dict=True)
 
     wandb.log({
         "epoch": epoch + 1,
@@ -163,8 +210,7 @@ for epoch in range(num_epochs):
         "val/avg_loss": avg_val_loss,
         "val/accuracy": val_acc,
     })
-    
-    # ✅ Loop through class shortnames
+
     for short_name in shortnames:
         if short_name in train_report:
             wandb.log({
@@ -179,5 +225,28 @@ for epoch in range(num_epochs):
                 f"{short_name}/val_recall": val_report[short_name]["recall"],
                 f"{short_name}/val_f1": val_report[short_name]["f1-score"],
             }, step=epoch + 1)
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    print(f"Best Train Epoch: {best_train_epoch} | Acc: {best_train_acc:.4f}")
+    print(f"Best Val Epoch: {best_val_epoch} | Acc: {best_val_acc:.4f}")
+
+# === Final confusion matrix logging ===
+wandb.log({
+    "best_train/confusion_matrix": wandb.plot.confusion_matrix(
+        probs=None,
+        y_true=best_train_trues,
+        preds=best_train_preds,
+        class_names=shortnames
+    ),
+    "best_val/confusion_matrix": wandb.plot.confusion_matrix(
+        probs=None,
+        y_true=best_val_trues,
+        preds=best_val_preds,
+        class_names=shortnames
+    )
+})
 
 wandb.finish()

@@ -9,7 +9,6 @@ import pandas as pd
 import os
 import re
 
-
 def extract_species_and_site_from_filename(filename):
     base = os.path.splitext(filename)[0]
     parts = base.split("_")
@@ -58,7 +57,7 @@ def stratified_site_split_from_folder(image_dir, test_size=0.3, random_state=42)
 
 
 def filter_df_with_detections(df, image_dir, detector):
-    valid_rows = []
+    records = []
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Filtering with detector"):
         file_path = os.path.join(image_dir, row["filename"])
         try:
@@ -66,8 +65,15 @@ def filter_df_with_detections(df, image_dir, detector):
             preprocessed = detector.preprocess(img)
             result = detector.predict(filepath=file_path, img=preprocessed)
             detections = result.get("detections", [])
+
             if detections:
-                valid_rows.append(row)
+                # Extract the first bounding box
+                bbox = detections[0]["bbox"]  # format: [xmin, ymin, width, height]
+                row_data = row.to_dict()
+                row_data["bbox"] = bbox
+                records.append(row_data)
+
         except Exception as e:
             print(f"Skipping {row.get('filename', 'unknown')}: {e}")
-    return pd.DataFrame(valid_rows)
+
+    return pd.DataFrame(records)
